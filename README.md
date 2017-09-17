@@ -1,4 +1,4 @@
-# pgit
+# pgit [![CircleCI](https://circleci.com/gh/chriscasola/pgit.svg?style=svg)](https://circleci.com/gh/chriscasola/pgit)
 
 Pronounce "pee-git" - a database migration tool that lets you keep your schema and migrations in a git repository.
 
