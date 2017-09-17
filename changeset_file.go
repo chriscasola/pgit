@@ -1,6 +1,7 @@
 package pgit
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -22,6 +23,55 @@ type changesetFile struct {
 type changeset struct {
 	applySQL    string
 	rollbackSQL string
+}
+
+func (c *changesetFile) getPath() string {
+	return c.path
+}
+
+func (c *changesetFile) getApplySQL(currentVersion string) (string, string, error) {
+	applySQL := ""
+	currentVersionNum, err := strconv.ParseUint(currentVersion, 10, 64)
+
+	if err != nil {
+		if currentVersion == "" {
+			currentVersionNum = 0
+		} else {
+			return "", "", errors.Wrap(err, "expected integer for currentVersion")
+		}
+	}
+
+	if currentVersionNum > uint64(len(c.changesets)) {
+		return "", "", errors.New("no changesets defined to reach specified version")
+	}
+
+	if currentVersionNum == uint64(len(c.changesets)) {
+		return "", currentVersion, nil
+	}
+
+	for i := currentVersionNum; i < uint64(len(c.changesets)); i++ {
+		applySQL += c.changesets[i].applySQL + "\n"
+	}
+
+	return applySQL, strconv.FormatInt(int64(len(c.changesets)), 10), nil
+}
+
+func (c *changesetFile) getRollbackSQL(currentVersion string) (string, string, error) {
+	currentVersionNum, err := strconv.ParseUint(currentVersion, 10, 64)
+
+	if err != nil {
+		if currentVersion == "" {
+			return "", "0", nil
+		}
+
+		return "", "", errors.Wrap(err, "expected integer for currentVersion")
+	}
+
+	if currentVersionNum == 0 {
+		return "", "0", nil
+	}
+
+	return c.changesets[currentVersionNum-1].rollbackSQL, strconv.FormatUint(currentVersionNum-1, 10), nil
 }
 
 // readFromFile populates the changeset
