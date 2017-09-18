@@ -140,7 +140,7 @@ func (c *changesetFile) parse(fileContent []byte) error {
 			i = newIndex
 		} else if lines[i] == rollbackAnnotation {
 			return errors.Errorf("unexpected rollback statement (line %v)", i+1)
-		} else {
+		} else if lines[i] != "" {
 			return errors.New("could not parse file")
 		}
 	}

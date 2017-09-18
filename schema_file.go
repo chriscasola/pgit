@@ -26,13 +26,38 @@ type schemaDirectory struct {
 }
 
 func newSchemaDirectory(root string) *schemaDirectory {
-	return &schemaDirectory{root: root, files: make(map[string]schemaFile)}
+	return &schemaDirectory{root: root, files: make(map[string]schemaFile), state: &migrationState{}}
 }
 
-// writeMigrationState writes the in-memory version of the migration state out to
-// the database
-func (s *schemaDirectory) writeMigrationState(d DatabaseConnection) error {
-	return d.writeMigrationState(s.state)
+func (s *schemaDirectory) applyLatest(db DatabaseConnection) error {
+	if err := s.readFromDisk(); err != nil {
+		return errors.Wrap(err, "failed to populate schema from disk")
+	}
+
+	if err := s.readMigrationState(db); err != nil {
+		return errors.Wrap(err, "failed to read migration state")
+	}
+
+	for filePath, file := range s.files {
+		fileState, ok := s.state.fileStates[filePath]
+
+		if !ok {
+			s.state.fileStates[filePath] = &fileMigrationState{version: "", path: filePath}
+			fileState = s.state.fileStates[filePath]
+		}
+
+		sql, newVersion, err := file.getApplySQL(fileState.version)
+
+		if err != nil {
+			return errors.Wrapf(err, "failed to get apply SQL for %v", file.getPath())
+		}
+
+		if err = db.applyAndUpdateStateForFile(fileState, sql, newVersion); err != nil {
+			return errors.Wrapf(err, "failed to update state for %v", file.getPath())
+		}
+	}
+
+	return nil
 }
 
 // readMigrationState reads the current migration state of the database using
@@ -103,7 +128,9 @@ func (s *schemaDirectory) readFile(path, relativePath string) error {
 	switch tokens[1] {
 	case "changeset":
 		c := changesetFile{path: relativePath}
-		c.parse(fileContent[firstLineLength:])
+		if err := c.parse(fileContent[firstLineLength:]); err != nil {
+			return err
+		}
 		s.files[relativePath] = &c
 	default:
 		return errors.New("unknown file annotation for " + relativePath)

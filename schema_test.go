@@ -35,8 +35,8 @@ func (m *MockDatabaseConnection) readMigrationState() (*migrationState, error) {
 	return mockMigrationState, args.Error(1)
 }
 
-func (m *MockDatabaseConnection) writeMigrationState(s *migrationState) error {
-	args := m.Called(s)
+func (m *MockDatabaseConnection) applyAndUpdateStateForFile(f *fileMigrationState, updateSQL string, newVersion string) error {
+	args := m.Called(f, updateSQL, newVersion)
 	return args.Error(0)
 }
 
@@ -52,20 +52,41 @@ func TestSchemaDirectoryReadMigrationState(t *testing.T) {
 
 	mockConnection.AssertExpectations(t)
 	assert.Exactly(t, expectedMigrationState, s.state, "reads the migration state using the database connection")
+
+	mockConnection.AssertExpectations(t)
 }
 
-func TestSchemaDirectoryWriteMigrationState(t *testing.T) {
+func TestSchemaDirectoryApplyLatest(t *testing.T) {
 	s := newSchemaDirectory("./testdata/good_root")
 
 	mockConnection := &MockDatabaseConnection{}
-	expectedMigrationState := &migrationState{}
-	s.state = expectedMigrationState
-
-	mockConnection.On("writeMigrationState", expectedMigrationState).Return(nil)
-
-	if err := s.writeMigrationState(mockConnection); err != nil {
-		assert.FailNow(t, "writeMigrationState should not fail")
+	expectedMigrationState := &migrationState{
+		fileStates: make(map[string]*fileMigrationState),
 	}
+
+	mockConnection.On("readMigrationState").Return(expectedMigrationState, nil)
+
+	mockConnection.On(
+		"applyAndUpdateStateForFile",
+		&fileMigrationState{
+			version: "",
+			path:    "changelist_file.sql",
+		},
+		"CREATE TABLE test_table (\n    col_a text\n);\n\n\n",
+		"1",
+	).Return(nil)
+
+	mockConnection.On(
+		"applyAndUpdateStateForFile",
+		&fileMigrationState{
+			version: "",
+			path:    "subdir/changelist_file.sql",
+		},
+		"",
+		"",
+	).Return(nil)
+
+	assert.NoError(t, s.applyLatest(mockConnection), "should apply schema successfully")
 
 	mockConnection.AssertExpectations(t)
 }

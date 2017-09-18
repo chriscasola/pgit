@@ -11,7 +11,7 @@ import (
 // types of databases.
 type DatabaseConnection interface {
 	readMigrationState() (*migrationState, error)
-	writeMigrationState(m *migrationState) error
+	applyAndUpdateStateForFile(f *fileMigrationState, updateSQL string, newVersion string) error
 }
 
 // SQLDatabaseConnection contains pointers to the data about what migration state
@@ -47,22 +47,33 @@ func (f *fileMigrationState) FromRow(s sqlgo.ScannerFunction) error {
 }
 
 type migrationState struct {
-	fileStates map[string]fileMigrationState
+	fileStates map[string]*fileMigrationState
+}
+
+func newMigrationState() *migrationState {
+	return &migrationState{fileStates: make(map[string]*fileMigrationState)}
 }
 
 func (d *SQLDatabaseConnection) readMigrationState() (*migrationState, error) {
-	result, err := d.executor.Query("SELECT file, version FROM $1;", d.tableName)
+	result, err := d.executor.Query(`
+		CREATE TABLE IF NOT EXISTS ` + d.tableName + ` (
+			file text PRIMARY KEY,
+			version text NOT NULL
+		);
+		SELECT file, version FROM ` + d.tableName + `;`,
+	)
+
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to read migration state from database")
 	}
 
 	defer result.Close()
 
-	m := migrationState{}
+	m := newMigrationState()
 
 	for result.Next() {
-		f := fileMigrationState{}
-		if err := result.Read(&f); err != nil {
+		f := &fileMigrationState{}
+		if err := result.Read(f); err != nil {
 			return nil, errors.Wrap(err, "error reading file migration state")
 		}
 		m.fileStates[f.path] = f
@@ -72,19 +83,26 @@ func (d *SQLDatabaseConnection) readMigrationState() (*migrationState, error) {
 		return nil, errors.Wrap(err, "error reading file migration states")
 	}
 
-	return &m, nil
+	return m, nil
 }
 
-func (d *SQLDatabaseConnection) writeMigrationState(m *migrationState) error {
-	s := sqlgo.NewSerializer()
-	query := "BEGIN;\n"
-	for _, val := range m.fileStates {
-		query += fmt.Sprintf(
-			"INSERT INTO %v (file, version) VALUES (%v, %v);\n",
-			s.Add(d.tableName), s.Add(val.path), s.Add(val.version),
-		)
+func (d *SQLDatabaseConnection) applyAndUpdateStateForFile(f *fileMigrationState, updateSQL string, newVersion string) error {
+	sql := fmt.Sprintf(`
+		BEGIN;
+		%v	
+		INSERT INTO %v (file, version)
+		VALUES ('%v', '%v')
+		ON CONFLICT (file) DO UPDATE SET version = '%v';
+		COMMIT;
+	`, updateSQL, d.tableName, f.path, newVersion, newVersion)
+
+	result, err := d.executor.Query(sql)
+
+	if err != nil {
+		return err
 	}
-	query += "COMMIT;\n"
-	_, err := d.executor.Query(query, s.Params()...)
-	return err
+
+	defer result.Close()
+
+	return nil
 }
