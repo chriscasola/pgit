@@ -1,6 +1,7 @@
 package pgit
 
 import (
+	"fmt"
 	"io/ioutil"
 	"path/filepath"
 	"regexp"
@@ -29,6 +30,42 @@ func newSchemaDirectory(root string) *schemaDirectory {
 	return &schemaDirectory{root: root, files: make(map[string]schemaFile), state: &migrationState{}}
 }
 
+func (s *schemaDirectory) rollback(db DatabaseConnection) error {
+	if err := s.readFromDisk(); err != nil {
+		return errors.Wrap(err, "failed to populate schema from disk")
+	}
+
+	if err := s.readMigrationState(db); err != nil {
+		return errors.Wrap(err, "failed to read migration state")
+	}
+
+	filesInLastMigration, err := db.getFilesInMigration(s.state.lastMigration)
+
+	if err != nil {
+		return errors.Wrap(err, "unable to determine files involved in last migration")
+	}
+
+	for _, file := range filesInLastMigration {
+		rollbackSQL, newVersion, err := s.files[file.path].getRollbackSQL(file.version)
+
+		if err != nil {
+			fmt.Printf("WARNING: failed to get SQL for rolling back update (file=%v version=%v msg=%v)\n", file.path, file.version, err)
+			continue
+		}
+
+		if err = db.rollbackFile(&file, rollbackSQL, newVersion, s.state.lastMigration); err != nil {
+			fmt.Printf("WARNING: unable to rollback file (file=%v version=%v msg=%v)\n", file.path, newVersion, err)
+			return errors.Wrap(err, "unable to rollback changes to file")
+		}
+	}
+
+	if err = db.removeMigration(s.state.lastMigration); err != nil {
+		return errors.Wrap(err, "unable to remove migration after rolling back files")
+	}
+
+	return nil
+}
+
 func (s *schemaDirectory) applyLatest(db DatabaseConnection) error {
 	if err := s.readFromDisk(); err != nil {
 		return errors.Wrap(err, "failed to populate schema from disk")
@@ -37,6 +74,8 @@ func (s *schemaDirectory) applyLatest(db DatabaseConnection) error {
 	if err := s.readMigrationState(db); err != nil {
 		return errors.Wrap(err, "failed to read migration state")
 	}
+
+	var migration *migration
 
 	for filePath, file := range s.files {
 		fileState, ok := s.state.fileStates[filePath]
@@ -49,12 +88,29 @@ func (s *schemaDirectory) applyLatest(db DatabaseConnection) error {
 		sql, newVersion, err := file.getApplySQL(fileState.version)
 
 		if err != nil {
-			return errors.Wrapf(err, "failed to get apply SQL for %v", file.getPath())
+			fmt.Printf("WARNING: failed to get SQL for applying update (file=%v version=%v msg=%v)\n", file.getPath(), fileState.version, err)
+			continue
 		}
 
-		if err = db.applyAndUpdateStateForFile(fileState, sql, newVersion); err != nil {
-			return errors.Wrapf(err, "failed to update state for %v", file.getPath())
+		if newVersion == fileState.version {
+			continue
 		}
+
+		if migration == nil {
+			migration, err = db.createNewMigration()
+			if err != nil {
+				return err
+			}
+		}
+
+		if err = db.applyAndUpdateStateForFile(fileState, sql, newVersion, migration); err != nil {
+			fmt.Printf("WARNING: unable to apply update for file (file=%v version=%v msg=%v)\n", file.getPath(), newVersion, err)
+			continue
+		}
+	}
+
+	if migration != nil {
+		return db.finishMigration(migration)
 	}
 
 	return nil

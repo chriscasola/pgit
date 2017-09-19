@@ -35,9 +35,36 @@ func (m *MockDatabaseConnection) readMigrationState() (*migrationState, error) {
 	return mockMigrationState, args.Error(1)
 }
 
-func (m *MockDatabaseConnection) applyAndUpdateStateForFile(f *fileMigrationState, updateSQL string, newVersion string) error {
-	args := m.Called(f, updateSQL, newVersion)
+func (m *MockDatabaseConnection) applyAndUpdateStateForFile(f *fileMigrationState, updateSQL string, newVersion string, mig *migration) error {
+	args := m.Called(f, updateSQL, newVersion, mig)
 	return args.Error(0)
+}
+
+func (m *MockDatabaseConnection) createNewMigration() (*migration, error) {
+	args := m.Called()
+	mockMigration, _ := args.Get(0).(*migration)
+	return mockMigration, args.Error(1)
+}
+
+func (m *MockDatabaseConnection) finishMigration(mig *migration) error {
+	args := m.Called(mig)
+	return args.Error(0)
+}
+
+func (m *MockDatabaseConnection) rollbackFile(f *fileMigrationState, rollbackSQL string, newVersion string, lastMigration *migration) error {
+	args := m.Called(f, rollbackSQL, newVersion, lastMigration)
+	return args.Error(0)
+}
+
+func (m *MockDatabaseConnection) removeMigration(mig *migration) error {
+	args := m.Called(mig)
+	return args.Error(0)
+}
+
+func (m *MockDatabaseConnection) getFilesInMigration(mig *migration) ([]fileMigrationState, error) {
+	args := m.Called(mig)
+	mockFileState, _ := args.Get(0).([]fileMigrationState)
+	return mockFileState, args.Error(1)
 }
 
 func TestSchemaDirectoryReadMigrationState(t *testing.T) {
@@ -64,7 +91,10 @@ func TestSchemaDirectoryApplyLatest(t *testing.T) {
 		fileStates: make(map[string]*fileMigrationState),
 	}
 
+	mockMigration := &migration{id: 1, completed: false}
+
 	mockConnection.On("readMigrationState").Return(expectedMigrationState, nil)
+	mockConnection.On("createNewMigration").Return(mockMigration, nil)
 
 	mockConnection.On(
 		"applyAndUpdateStateForFile",
@@ -74,19 +104,43 @@ func TestSchemaDirectoryApplyLatest(t *testing.T) {
 		},
 		"CREATE TABLE test_table (\n    col_a text\n);\n\n\n",
 		"1",
+		mockMigration,
 	).Return(nil)
 
-	mockConnection.On(
-		"applyAndUpdateStateForFile",
-		&fileMigrationState{
-			version: "",
-			path:    "subdir/changelist_file.sql",
-		},
-		"",
-		"",
-	).Return(nil)
+	mockConnection.On("finishMigration", mockMigration).Return(nil)
 
 	assert.NoError(t, s.applyLatest(mockConnection), "should apply schema successfully")
 
 	mockConnection.AssertExpectations(t)
+}
+
+func TestSchemaDirectoryRollback(t *testing.T) {
+	s := newSchemaDirectory("./testdata/good_root")
+	mockConnection := &MockDatabaseConnection{}
+
+	expectedMigration := migration{id: 1, completed: true}
+
+	expectedMigrationState := &migrationState{
+		fileStates:    make(map[string]*fileMigrationState),
+		lastMigration: &expectedMigration,
+	}
+
+	fileState := &fileMigrationState{
+		version:   "1",
+		path:      "changelist_file.sql",
+		migration: 1,
+	}
+
+	expectedMigrationState.fileStates["changelist_file.sql"] = fileState
+	expectedFilesInMigration := []fileMigrationState{*fileState}
+
+	mockConnection.On("readMigrationState").Return(expectedMigrationState, nil)
+
+	mockConnection.On("getFilesInMigration", &expectedMigration).Return(expectedFilesInMigration, nil)
+
+	mockConnection.On("rollbackFile", fileState, "DROP TABLE test_table\n\n", "0", &expectedMigration).Return(nil)
+
+	mockConnection.On("removeMigration", &expectedMigration).Return(nil)
+
+	assert.NoError(t, s.rollback(mockConnection), "should rollback successfully")
 }
