@@ -39,6 +39,8 @@ func TestDefinitionFileGitOps(t *testing.T) {
 	}()
 
 	runCommand(t, name, "git", "init")
+	runCommand(t, name, "git", "config", "user.email", "test@test.com")
+	runCommand(t, name, "git", "config", "user.name", "Test Name")
 
 	fileName := filepath.Join(name, "/test_def.sql")
 
