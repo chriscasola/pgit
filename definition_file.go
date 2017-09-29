@@ -1,6 +1,7 @@
 package pgit
 
 import (
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -67,6 +68,10 @@ func (d *definitionFile) getCurrentSHA() (string, error) {
 	result, err := cmd.Output()
 
 	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			fmt.Printf("git command error: %v", exitErr.Stderr)
+			return "", errors.Wrapf(err, "git command failure: %v", exitErr.Error())
+		}
 		return "", errors.Wrap(err, "git command failed")
 	}
 
@@ -132,6 +137,10 @@ func (d *definitionFile) getFileAtRevision(version string) ([]byte, error) {
 	result, err = cmd.Output()
 
 	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			fmt.Printf("git command error: %v", exitErr.Stderr)
+			return result, errors.Wrapf(err, "git command failure: %v", exitErr.Error())
+		}
 		return result, errors.Wrap(err, "git command failed")
 	}
 
@@ -143,6 +152,10 @@ func (d *definitionFile) getPathRelativeToGitRoot() (string, error) {
 	cmd.Dir = filepath.Dir(d.path)
 	gitRootPath, err := cmd.Output()
 	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			fmt.Printf("git command error: %v", exitErr.Stderr)
+			return "", errors.Wrapf(err, "git command failure: %v", exitErr.Error())
+		}
 		return "", err
 	}
 

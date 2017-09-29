@@ -1,6 +1,7 @@
 package pgit
 
 import (
+	"fmt"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -125,7 +126,11 @@ DROP FUNCTION func (text, text, text);
 func runCommand(t *testing.T, dir string, command string, args ...string) {
 	cmd := exec.Command(command, args...)
 	cmd.Dir = dir
-	assert.NoErrorf(t, cmd.Run(), "command failed: %v", command)
+	err := cmd.Run()
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		fmt.Printf("git command error: %v", exitErr.Stderr)
+	}
+	assert.NoErrorf(t, err, "command failed: %v", command)
 }
 
 func writeTestFile(file *os.File, fileContent string) {
