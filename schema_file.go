@@ -188,6 +188,9 @@ func (s *schemaDirectory) readFile(path, relativePath string) error {
 			return err
 		}
 		s.files[relativePath] = &c
+	case "definition":
+		d := definitionFile{path: relativePath, content: fileContent[firstLineLength:]}
+		s.files[relativePath] = &d
 	default:
 		return errors.New("unknown file annotation for " + relativePath)
 	}

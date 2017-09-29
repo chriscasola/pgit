@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	changesetAnnotation = "-- change"
-	rollbackAnnotation  = "-- rollback"
+	changesetAnnotation  = "-- change"
+	rollbackAnnotation   = "-- rollback"
+	definitionAnnotation = "-- definition"
 )
 
 // changesetFile represents a file using the "changeset" method for describing
