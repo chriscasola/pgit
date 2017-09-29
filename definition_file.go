@@ -1,7 +1,6 @@
 package pgit
 
 import (
-	"io/ioutil"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -65,23 +64,9 @@ var shaRegexp = regexp.MustCompile(`^([a-fA-F0-9]{40})\s*`)
 func (d *definitionFile) getCurrentSHA() (string, error) {
 	cmd := exec.Command("git", "log", "--pretty=oneline", "-n", "1", d.path)
 	cmd.Dir = filepath.Dir(d.path)
-	stdout, err := cmd.StdoutPipe()
+	result, err := cmd.Output()
 
 	if err != nil {
-		return "", errors.Wrap(err, "error connecting to stdout")
-	}
-
-	if err := cmd.Start(); err != nil {
-		return "", errors.Wrap(err, "failed to start git command")
-	}
-
-	result, err := ioutil.ReadAll(stdout)
-
-	if err != nil {
-		return "", errors.Wrap(err, "failed to read output from git command")
-	}
-
-	if err := cmd.Wait(); err != nil {
 		return "", errors.Wrap(err, "git command failed")
 	}
 
@@ -144,23 +129,9 @@ func (d *definitionFile) getFileAtRevision(version string) ([]byte, error) {
 
 	cmd := exec.Command("git", "show", version+":"+relativePath)
 	cmd.Dir = filepath.Dir(d.path)
-	stdout, err := cmd.StdoutPipe()
+	result, err = cmd.Output()
 
 	if err != nil {
-		return result, errors.Wrap(err, "error connecting to stdout")
-	}
-
-	if err := cmd.Start(); err != nil {
-		return result, errors.Wrap(err, "failed to start git command")
-	}
-
-	result, err = ioutil.ReadAll(stdout)
-
-	if err != nil {
-		return result, errors.Wrap(err, "failed to read output from git command")
-	}
-
-	if err := cmd.Wait(); err != nil {
 		return result, errors.Wrap(err, "git command failed")
 	}
 
