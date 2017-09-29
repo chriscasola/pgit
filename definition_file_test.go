@@ -105,13 +105,16 @@ DROP FUNCTION func (text, text, text);
 	runCommand(t, name, "git", "add", "-A")
 	runCommand(t, name, "git", "commit", "-m", `"commit 2"`)
 
+	var secondVersion string
+
 	t.Run("get apply SQL for second version", func(t *testing.T) {
 		fileContent, err := ioutil.ReadFile(fileName)
 		assert.NoError(t, err, "failed to read test file")
 
 		d := definitionFile{path: fileName, content: fileContent}
 
-		sql, version, err := d.getApplySQL(firstVersion)
+		var sql string
+		sql, secondVersion, err = d.getApplySQL(firstVersion)
 
 		assert.NoError(t, err, "should not error when getting apply SQL")
 		assert.Equal(
@@ -120,8 +123,93 @@ DROP FUNCTION func (text, text, text);
 			sql,
 			"should return apply SQL",
 		)
-		assert.Regexp(t, shaTest, version, "version should be a git sha")
+		assert.Regexp(t, shaTest, secondVersion, "version should be a git sha")
+		assert.NotEqual(t, firstVersion, secondVersion, "should return new git sha")
+	})
+
+	writeTestFile(file, `
+-- definition
+CREATE FUNCTION func (text, text, text, text);
+
+-- rollback
+DROP FUNCTION func (text, text, text, text);
+	`)
+
+	t.Run("get apply SQL for uncommitted version", func(t *testing.T) {
+		fileContent, err := ioutil.ReadFile(fileName)
+		assert.NoError(t, err, "failed to read test file")
+
+		d := definitionFile{path: fileName, content: fileContent}
+
+		sql, version, err := d.getApplySQL(secondVersion)
+
+		assert.NoError(t, err, "should not error when getting apply SQL")
+		assert.Equal(
+			t,
+			"DROP FUNCTION func (text, text, text);\t;\\nCREATE FUNCTION func (text, text, text, text);",
+			sql,
+			"should return apply SQL",
+		)
+		assert.Equal(t, uncommittedVersion, version, `version should be "uncommitted"`)
+	})
+
+	t.Run("get apply SQL for second uncommitted version", func(t *testing.T) {
+		fileContent, err := ioutil.ReadFile(fileName)
+		assert.NoError(t, err, "failed to read test file")
+
+		d := definitionFile{path: fileName, content: fileContent}
+
+		_, _, err = d.getApplySQL(uncommittedVersion)
+
+		assert.Error(t, err, "should not allow a migration when the currently applied version is uncommitted")
+	})
+
+	secondFileName := filepath.Join(name, "/test_def2.sql")
+
+	secondFile, err := os.Create(secondFileName)
+
+	assert.NoError(t, err, "failed to create second definition file")
+
+	defer func() {
+		assert.NoError(t, secondFile.Close(), "failed to close second definition file")
+	}()
+
+	writeTestFile(secondFile, `
+-- definition
+CREATE FUNCTION func (text, text, text, text);
+
+-- rollback
+DROP FUNCTION func (text, text, text, text);
+	`)
+
+	t.Run("get apply SQL for untracked file", func(t *testing.T) {
+		fileContent, err := ioutil.ReadFile(secondFileName)
+		assert.NoError(t, err, "failed to read test file")
+
+		d := definitionFile{path: secondFileName, content: fileContent}
+
+		sql, version, err := d.getApplySQL("")
+
+		assert.NoError(t, err, "should not error when getting apply SQL")
+		assert.Equal(
+			t,
+			"CREATE FUNCTION func (text, text, text, text);",
+			sql,
+			"should return apply SQL",
+		)
+		assert.Equal(t, uncommittedVersion, version, `version should be "uncommitted"`)
 		assert.NotEqual(t, firstVersion, version, "should return new git sha")
+	})
+
+	t.Run("get apply SQL for already untracked file", func(t *testing.T) {
+		fileContent, err := ioutil.ReadFile(secondFileName)
+		assert.NoError(t, err, "failed to read test file")
+
+		d := definitionFile{path: secondFileName, content: fileContent}
+
+		_, _, err = d.getApplySQL(uncommittedVersion)
+
+		assert.Error(t, err, "should error when getting apply SQL")
 	})
 }
 

@@ -10,6 +10,10 @@ import (
 	"github.com/pkg/errors"
 )
 
+const (
+	uncommittedVersion = "uncommitted"
+)
+
 type definitionFile struct {
 	path    string
 	content []byte
@@ -63,7 +67,21 @@ func (d *definitionFile) parse(fileContent []byte) (string, string, error) {
 var shaRegexp = regexp.MustCompile(`^([a-fA-F0-9]{40})\s*`)
 
 func (d *definitionFile) getCurrentSHA() (string, error) {
-	cmd := exec.Command("git", "log", "--pretty=oneline", "-n", "1", d.path)
+	relativePath, err := d.getPathRelativeToGitRoot()
+	if err != nil {
+		return "", err
+	}
+
+	// check for uncommitted changes
+	cmd := exec.Command("git", "status", relativePath, "--porcelain")
+	cmd.Dir = filepath.Dir(d.path)
+	fileStatus, err := cmd.Output()
+
+	if len(fileStatus) > 1 {
+		return uncommittedVersion, nil
+	}
+
+	cmd = exec.Command("git", "log", "--pretty=oneline", "-n", "1", d.path)
 	cmd.Dir = filepath.Dir(d.path)
 	result, err := cmd.Output()
 
@@ -85,6 +103,11 @@ func (d *definitionFile) getCurrentSHA() (string, error) {
 }
 
 func (d *definitionFile) getApplySQL(currentVersion string) (string, string, error) {
+	if currentVersion == uncommittedVersion {
+		fmt.Println("Cannot apply migration to an uncommitted version, please rollback the last migration first!")
+		return "", "", errors.New("cannot apply migration to an uncommitted version")
+	}
+
 	fileVersion, err := d.getCurrentSHA()
 
 	if err != nil {
@@ -93,6 +116,11 @@ func (d *definitionFile) getApplySQL(currentVersion string) (string, string, err
 
 	if fileVersion == currentVersion {
 		return "", currentVersion, nil
+	}
+
+	if fileVersion == uncommittedVersion {
+		relativePath, _ := d.getPathRelativeToGitRoot()
+		fmt.Printf("Applying uncommitted file %v, be sure to rollback before committing!\n", relativePath)
 	}
 
 	apply, _, err := d.parse(d.content)
