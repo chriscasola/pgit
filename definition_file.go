@@ -69,7 +69,7 @@ func (d *definitionFile) getCurrentSHA() (string, error) {
 
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			fmt.Printf("git command error: %v", exitErr.Stderr)
+			fmt.Printf("git command error: %v", string(exitErr.Stderr))
 			return "", errors.Wrapf(err, "git command failure: %v", exitErr.Error())
 		}
 		return "", errors.Wrap(err, "git command failed")
@@ -138,7 +138,7 @@ func (d *definitionFile) getFileAtRevision(version string) ([]byte, error) {
 
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			fmt.Printf("git command error: %v", exitErr.Stderr)
+			fmt.Printf("git command error: %v", string(exitErr.Stderr))
 			return result, errors.Wrapf(err, "git command failure: %v", exitErr.Error())
 		}
 		return result, errors.Wrap(err, "git command failed")
@@ -153,7 +153,7 @@ func (d *definitionFile) getPathRelativeToGitRoot() (string, error) {
 	gitRootPath, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			fmt.Printf("git command error: %v", exitErr.Stderr)
+			fmt.Printf("git command error: %v", string(exitErr.Stderr))
 			return "", errors.Wrapf(err, "git command failure: %v", exitErr.Error())
 		}
 		return "", err

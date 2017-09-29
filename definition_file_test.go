@@ -128,7 +128,7 @@ func runCommand(t *testing.T, dir string, command string, args ...string) {
 	cmd.Dir = dir
 	err := cmd.Run()
 	if exitErr, ok := err.(*exec.ExitError); ok {
-		fmt.Printf("git command error: %v", exitErr.Stderr)
+		fmt.Printf("git command error: %v", string(exitErr.Stderr))
 	}
 	assert.NoErrorf(t, err, "command failed: %v", command)
 }
