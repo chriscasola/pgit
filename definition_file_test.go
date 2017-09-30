@@ -60,6 +60,42 @@ CREATE FUNCTION func (text, text);
 DROP FUNCTION func (text, text);
 	`)
 
+	t.Run("get apply SQL for empty repo", func(t *testing.T) {
+		fileContent, err := ioutil.ReadFile(fileName)
+		assert.NoError(t, err, "failed to read test file")
+
+		d := definitionFile{path: fileName, content: fileContent}
+
+		sql, version, err := d.getApplySQL("")
+
+		assert.NoError(t, err, "should not error when getting apply SQL")
+		assert.Equal(
+			t,
+			"CREATE FUNCTION func (text, text);",
+			sql,
+			"should return apply SQL",
+		)
+		assert.Equal(t, uncommittedVersion, version, "version should be uncommitted")
+	})
+
+	t.Run("get rollback SQL for empty repo", func(t *testing.T) {
+		fileContent, err := ioutil.ReadFile(fileName)
+		assert.NoError(t, err, "failed to read test file")
+
+		d := definitionFile{path: fileName, content: fileContent}
+
+		sql, version, err := d.getRollbackSQL(uncommittedVersion)
+
+		assert.NoError(t, err, "should not error when getting rollback SQL")
+		assert.Equal(
+			t,
+			"DROP FUNCTION func (text, text);",
+			sql,
+			"should return rollback SQL",
+		)
+		assert.Equal(t, "", version, "version should be empty")
+	})
+
 	runCommand(t, name, "git", "add", "-A")
 	runCommand(t, name, "git", "commit", "-m", `"commit 1"`)
 
@@ -94,6 +130,24 @@ DROP FUNCTION func (text, text);
 		assert.Equal(t, firstVersion, version, "version should be current git sha")
 	})
 
+	t.Run("get rollback SQL for first version", func(t *testing.T) {
+		fileContent, err := ioutil.ReadFile(fileName)
+		assert.NoError(t, err, "failed to read test file")
+
+		d := definitionFile{path: fileName, content: fileContent}
+
+		sql, version, err := d.getRollbackSQL(firstVersion)
+
+		assert.NoError(t, err, "should not error when getting rollback SQL")
+		assert.Equal(
+			t,
+			"DROP FUNCTION func (text, text);",
+			sql,
+			"should return rollback SQL",
+		)
+		assert.Equal(t, "", version, "version should be current git sha")
+	})
+
 	writeTestFile(file, `
 -- definition
 CREATE FUNCTION func (text, text, text);
@@ -119,12 +173,30 @@ DROP FUNCTION func (text, text, text);
 		assert.NoError(t, err, "should not error when getting apply SQL")
 		assert.Equal(
 			t,
-			"DROP FUNCTION func (text, text);\t;\\nCREATE FUNCTION func (text, text, text);",
+			"DROP FUNCTION func (text, text);;\nCREATE FUNCTION func (text, text, text);",
 			sql,
 			"should return apply SQL",
 		)
 		assert.Regexp(t, shaTest, secondVersion, "version should be a git sha")
 		assert.NotEqual(t, firstVersion, secondVersion, "should return new git sha")
+	})
+
+	t.Run("get rollback SQL for second version", func(t *testing.T) {
+		fileContent, err := ioutil.ReadFile(fileName)
+		assert.NoError(t, err, "failed to read test file")
+
+		d := definitionFile{path: fileName, content: fileContent}
+
+		sql, version, err := d.getRollbackSQL(secondVersion)
+
+		assert.NoError(t, err, "should not error when getting rollback SQL")
+		assert.Equal(
+			t,
+			"DROP FUNCTION func (text, text, text);;\nCREATE FUNCTION func (text, text);",
+			sql,
+			"should return rollback SQL",
+		)
+		assert.Equal(t, firstVersion, version, "version should be current git sha")
 	})
 
 	writeTestFile(file, `
@@ -146,11 +218,29 @@ DROP FUNCTION func (text, text, text, text);
 		assert.NoError(t, err, "should not error when getting apply SQL")
 		assert.Equal(
 			t,
-			"DROP FUNCTION func (text, text, text);\t;\\nCREATE FUNCTION func (text, text, text, text);",
+			"DROP FUNCTION func (text, text, text);;\nCREATE FUNCTION func (text, text, text, text);",
 			sql,
 			"should return apply SQL",
 		)
 		assert.Equal(t, uncommittedVersion, version, `version should be "uncommitted"`)
+	})
+
+	t.Run("get rollback SQL for uncommitted version", func(t *testing.T) {
+		fileContent, err := ioutil.ReadFile(fileName)
+		assert.NoError(t, err, "failed to read test file")
+
+		d := definitionFile{path: fileName, content: fileContent}
+
+		sql, version, err := d.getRollbackSQL(uncommittedVersion)
+
+		assert.NoError(t, err, "should not error when getting rollback SQL")
+		assert.Equal(
+			t,
+			"DROP FUNCTION func (text, text, text, text);;\nCREATE FUNCTION func (text, text, text);",
+			sql,
+			"should return rollback SQL",
+		)
+		assert.Equal(t, secondVersion, version, "should rollback to second version")
 	})
 
 	t.Run("get apply SQL for second uncommitted version", func(t *testing.T) {
@@ -198,7 +288,24 @@ DROP FUNCTION func (text, text, text, text);
 			"should return apply SQL",
 		)
 		assert.Equal(t, uncommittedVersion, version, `version should be "uncommitted"`)
-		assert.NotEqual(t, firstVersion, version, "should return new git sha")
+	})
+
+	t.Run("get rollback SQL for untracked file", func(t *testing.T) {
+		fileContent, err := ioutil.ReadFile(secondFileName)
+		assert.NoError(t, err, "failed to read test file")
+
+		d := definitionFile{path: secondFileName, content: fileContent}
+
+		sql, version, err := d.getRollbackSQL(uncommittedVersion)
+
+		assert.NoError(t, err, "should not error when getting rollback SQL")
+		assert.Equal(
+			t,
+			"DROP FUNCTION func (text, text, text, text);",
+			sql,
+			"should return rollback SQL",
+		)
+		assert.Equal(t, "", version, "should rollback to empty version")
 	})
 
 	t.Run("get apply SQL for already untracked file", func(t *testing.T) {

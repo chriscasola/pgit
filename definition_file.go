@@ -2,6 +2,7 @@ package pgit
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -81,7 +82,7 @@ func (d *definitionFile) getCurrentSHA() (string, error) {
 		return uncommittedVersion, nil
 	}
 
-	cmd = exec.Command("git", "log", "--pretty=oneline", "-n", "1", d.path)
+	cmd = exec.Command("git", "log", "--pretty=oneline", "--follow", "-n", "1", d.path)
 	cmd.Dir = filepath.Dir(d.path)
 	result, err := cmd.Output()
 
@@ -130,10 +131,10 @@ func (d *definitionFile) getApplySQL(currentVersion string) (string, string, err
 	}
 
 	if currentVersion == "" {
-		return apply, fileVersion, nil
+		return strings.TrimSpace(apply), fileVersion, nil
 	}
 
-	prevRevisionContent, err := d.getFileAtRevision(currentVersion)
+	prevRevisionContent, err := d.getFileAtCommit(currentVersion)
 
 	if err != nil {
 		return "", "", errors.Wrap(err, "unable to get previous version of file")
@@ -145,14 +146,96 @@ func (d *definitionFile) getApplySQL(currentVersion string) (string, string, err
 		return "", "", errors.Wrap(err, "unable to get rollback SQL from previous version of file")
 	}
 
-	return rollback + `;\n` + apply, fileVersion, nil
+	return strings.TrimSpace(rollback) + ";\n" + strings.TrimSpace(apply), fileVersion, nil
 }
 
 func (d *definitionFile) getRollbackSQL(currentVersion string) (string, string, error) {
-	return "", "", errors.New("definition files do not support rollback")
+	if currentVersion == "" {
+		return "", "", nil
+	}
+
+	commits, err := d.getFileCommits()
+	if err != nil {
+		return "", "", err
+	}
+
+	previousVersion := ""
+	currentFileContent := make([]byte, 0)
+	previousFileContent := make([]byte, 0)
+
+	if currentVersion == uncommittedVersion {
+		currentFileContent, err = ioutil.ReadFile(d.path)
+		if err != nil {
+			return "", "", err
+		}
+	} else {
+		currentFileContent, err = d.getFileAtCommit(currentVersion)
+	}
+
+	if currentVersion == uncommittedVersion {
+		if len(commits) > 0 {
+			previousVersion = commits[0]
+			previousFileContent, err = d.getFileAtCommit(previousVersion)
+			if err != nil {
+				return "", "", err
+			}
+		}
+	} else {
+		for i, c := range commits {
+			if c == currentVersion && i < len(commits)-1 {
+				previousVersion = commits[i+1]
+				previousFileContent, err = d.getFileAtCommit(previousVersion)
+				if err != nil {
+					return "", "", err
+				}
+				break
+			}
+		}
+	}
+
+	apply, rollback := "", ""
+
+	if len(previousFileContent) > 0 {
+		apply, _, err = d.parse(previousFileContent)
+		if err != nil {
+			return "", "", err
+		}
+	}
+
+	if len(currentFileContent) > 0 {
+		_, rollback, err = d.parse(currentFileContent)
+		if err != nil {
+			return "", "", err
+		}
+	}
+
+	if len(previousFileContent) > 0 && len(currentFileContent) > 0 {
+		return strings.TrimSpace(rollback) + ";\n" + strings.TrimSpace(apply), previousVersion, nil
+	}
+
+	return strings.TrimSpace(rollback), strings.TrimSpace(previousVersion), nil
 }
 
-func (d *definitionFile) getFileAtRevision(version string) ([]byte, error) {
+func (d *definitionFile) getFileCommits() ([]string, error) {
+	cmd := exec.Command("git", "log", "--format=%H", "--follow", d.path)
+	cmd.Dir = filepath.Dir(d.path)
+	history, err := cmd.Output()
+	if err != nil {
+		return make([]string, 0), nil
+	}
+
+	result := make([]string, 0)
+	for _, s := range strings.Split(string(history), "\n") {
+		trimmed := strings.TrimSpace(s)
+		if len(trimmed) > 0 {
+			result = append(result, strings.TrimSpace(s))
+		}
+	}
+
+	return result, nil
+}
+
+func (d *definitionFile) getFileAtCommit(version string) ([]byte, error) {
 	var result []byte
 
 	relativePath, err := d.getPathRelativeToGitRoot()
