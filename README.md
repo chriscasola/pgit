@@ -3,9 +3,9 @@
 Pronounce "pee-git" - a database migration tool that lets you keep your schema and migrations in a git repository.
 
 ## Roadmap
-- [ ] Implement support for the `changeset` file type
-- [ ] Implement support for the `definition` file type
-- [ ] Build out a CLI
+- [x] Implement support for the `changeset` file type
+- [x] Implement support for the `definition` file type
+- [x] Build out a CLI
 
 ## Installing
 
@@ -15,6 +15,8 @@ go get github.com/chriscasola/pgit
 
 With pgit you should place all of the `.sql` files describing your database and migrations into a single directory
 inside your project (there can be nested directories).
+
+To perform a migration run `pgit -database <database-connection-string> -root <path-to-sql-directory> migrate`
 
 ### File Types
 
