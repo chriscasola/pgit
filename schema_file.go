@@ -3,6 +3,7 @@ package pgit
 import (
 	"fmt"
 	"io/ioutil"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -21,13 +22,23 @@ type schemaFile interface {
 // schemaDirectory represents the directory containing the files
 // that define a database schema.
 type schemaDirectory struct {
-	root  string
-	files map[string]schemaFile
-	state *migrationState
+	gitRoot string
+	root    string
+	files   map[string]schemaFile
+	state   *migrationState
 }
 
-func newSchemaDirectory(root string) *schemaDirectory {
-	return &schemaDirectory{root: root, files: make(map[string]schemaFile), state: &migrationState{}}
+func newSchemaDirectory(root string) (*schemaDirectory, error) {
+	gitRoot, err := getGitRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+
+	return &schemaDirectory{gitRoot: gitRoot, root: absRoot, files: make(map[string]schemaFile), state: &migrationState{}}, nil
 }
 
 func (s *schemaDirectory) rollback(db DatabaseConnection) error {
@@ -131,7 +142,10 @@ func (s *schemaDirectory) readMigrationState(d DatabaseConnection) error {
 // creates an in-memory representation of the content that can then be
 // applied to the database
 func (s *schemaDirectory) readFromDisk() error {
-	return s.readDirectory(s.root, "")
+	// can't use filepath.Rel because it annoyingly prefixes the relative
+	// path with "../" which git doesn't like
+	relativePath := s.root[len(s.gitRoot)+1:]
+	return s.readDirectory(s.root, relativePath)
 }
 
 func (s *schemaDirectory) readDirectory(path, relativePath string) error {
@@ -142,7 +156,9 @@ func (s *schemaDirectory) readDirectory(path, relativePath string) error {
 	}
 
 	for _, entry := range dirContent {
-		if entry.IsDir() {
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		} else if entry.IsDir() {
 			err := s.readDirectory(filepath.Join(path, entry.Name()), filepath.Join(relativePath, entry.Name()))
 			if err != nil {
 				return err
@@ -189,11 +205,25 @@ func (s *schemaDirectory) readFile(path, relativePath string) error {
 		}
 		s.files[relativePath] = &c
 	case "definition":
-		d := definitionFile{path: relativePath, content: fileContent[firstLineLength:]}
+		d := definitionFile{path: relativePath, gitRoot: s.gitRoot, content: fileContent[firstLineLength:]}
 		s.files[relativePath] = &d
 	default:
 		return errors.New("unknown file annotation for " + relativePath)
 	}
 
 	return nil
+}
+
+func getGitRoot(path string) (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd.Dir = path
+	gitRootPath, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return "", errors.Wrapf(err, "git command failure: %v", exitErr.Error())
+		}
+		return "", err
+	}
+
+	return strings.TrimSpace(string(gitRootPath)), nil
 }

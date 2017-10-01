@@ -25,26 +25,27 @@ func TestDefinitionFileParse(t *testing.T) {
 
 	assert.NoError(t, err, "should parse the file")
 
-	assert.Equal(t, apply, "CREATE TABLE test_table (col_a text);")
-	assert.Equal(t, rollback, "DROP TABLE test_table;")
+	assert.Equal(t, "CREATE TABLE test_table (col_a text);\n\n", apply)
+	assert.Equal(t, "DROP TABLE test_table;\n\n", rollback)
 }
 
 func TestDefinitionFileGitOps(t *testing.T) {
-	name, err := ioutil.TempDir("", "pgit-test")
+	gitRoot, err := ioutil.TempDir("", "pgit-test")
 
 	assert.NoError(t, err, "failed to create temp directory for test repo")
 
 	defer func() {
-		assert.NoError(t, os.RemoveAll(name), "failed to remove temp directory")
+		assert.NoError(t, os.RemoveAll(gitRoot), "failed to remove temp directory")
 	}()
 
-	runCommand(t, name, "git", "init")
-	runCommand(t, name, "git", "config", "user.email", "test@test.com")
-	runCommand(t, name, "git", "config", "user.name", "Test Name")
+	runCommand(t, gitRoot, "git", "init")
+	runCommand(t, gitRoot, "git", "config", "user.email", "test@test.com")
+	runCommand(t, gitRoot, "git", "config", "user.name", "Test Name")
 
-	fileName := filepath.Join(name, "/test_def.sql")
+	fileName := "test_def.sql"
+	filePath := filepath.Join(gitRoot, "/test_def.sql")
 
-	file, err := os.Create(fileName)
+	file, err := os.Create(filePath)
 
 	assert.NoError(t, err, "failed to create definition file")
 
@@ -61,10 +62,10 @@ DROP FUNCTION func (text, text);
 	`)
 
 	t.Run("get apply SQL for empty repo", func(t *testing.T) {
-		fileContent, err := ioutil.ReadFile(fileName)
+		fileContent, err := ioutil.ReadFile(filePath)
 		assert.NoError(t, err, "failed to read test file")
 
-		d := definitionFile{path: fileName, content: fileContent}
+		d := definitionFile{path: fileName, content: fileContent, gitRoot: gitRoot}
 
 		sql, version, err := d.getApplySQL("")
 
@@ -79,10 +80,10 @@ DROP FUNCTION func (text, text);
 	})
 
 	t.Run("get rollback SQL for empty repo", func(t *testing.T) {
-		fileContent, err := ioutil.ReadFile(fileName)
+		fileContent, err := ioutil.ReadFile(filePath)
 		assert.NoError(t, err, "failed to read test file")
 
-		d := definitionFile{path: fileName, content: fileContent}
+		d := definitionFile{path: fileName, content: fileContent, gitRoot: gitRoot}
 
 		sql, version, err := d.getRollbackSQL(uncommittedVersion)
 
@@ -96,14 +97,14 @@ DROP FUNCTION func (text, text);
 		assert.Equal(t, "", version, "version should be empty")
 	})
 
-	runCommand(t, name, "git", "add", "-A")
-	runCommand(t, name, "git", "commit", "-m", `"commit 1"`)
+	runCommand(t, gitRoot, "git", "add", "-A")
+	runCommand(t, gitRoot, "git", "commit", "-m", `"commit 1"`)
 
 	shaTest := regexp.MustCompile("^[0-9a-f]{40}$")
 	var firstVersion string
 
 	t.Run("getCurrentSHA", func(t *testing.T) {
-		d := definitionFile{path: fileName}
+		d := definitionFile{path: fileName, gitRoot: gitRoot}
 
 		var err error
 		firstVersion, err = d.getCurrentSHA()
@@ -113,10 +114,10 @@ DROP FUNCTION func (text, text);
 	})
 
 	t.Run("get apply SQL for first version", func(t *testing.T) {
-		fileContent, err := ioutil.ReadFile(fileName)
+		fileContent, err := ioutil.ReadFile(filePath)
 		assert.NoError(t, err, "failed to read test file")
 
-		d := definitionFile{path: fileName, content: fileContent}
+		d := definitionFile{path: fileName, content: fileContent, gitRoot: gitRoot}
 
 		sql, version, err := d.getApplySQL("")
 
@@ -131,10 +132,10 @@ DROP FUNCTION func (text, text);
 	})
 
 	t.Run("get rollback SQL for first version", func(t *testing.T) {
-		fileContent, err := ioutil.ReadFile(fileName)
+		fileContent, err := ioutil.ReadFile(filePath)
 		assert.NoError(t, err, "failed to read test file")
 
-		d := definitionFile{path: fileName, content: fileContent}
+		d := definitionFile{path: fileName, content: fileContent, gitRoot: gitRoot}
 
 		sql, version, err := d.getRollbackSQL(firstVersion)
 
@@ -156,16 +157,16 @@ CREATE FUNCTION func (text, text, text);
 DROP FUNCTION func (text, text, text);
 	`)
 
-	runCommand(t, name, "git", "add", "-A")
-	runCommand(t, name, "git", "commit", "-m", `"commit 2"`)
+	runCommand(t, gitRoot, "git", "add", "-A")
+	runCommand(t, gitRoot, "git", "commit", "-m", `"commit 2"`)
 
 	var secondVersion string
 
 	t.Run("get apply SQL for second version", func(t *testing.T) {
-		fileContent, err := ioutil.ReadFile(fileName)
+		fileContent, err := ioutil.ReadFile(filePath)
 		assert.NoError(t, err, "failed to read test file")
 
-		d := definitionFile{path: fileName, content: fileContent}
+		d := definitionFile{path: fileName, content: fileContent, gitRoot: gitRoot}
 
 		var sql string
 		sql, secondVersion, err = d.getApplySQL(firstVersion)
@@ -182,10 +183,10 @@ DROP FUNCTION func (text, text, text);
 	})
 
 	t.Run("get rollback SQL for second version", func(t *testing.T) {
-		fileContent, err := ioutil.ReadFile(fileName)
+		fileContent, err := ioutil.ReadFile(filePath)
 		assert.NoError(t, err, "failed to read test file")
 
-		d := definitionFile{path: fileName, content: fileContent}
+		d := definitionFile{path: fileName, content: fileContent, gitRoot: gitRoot}
 
 		sql, version, err := d.getRollbackSQL(secondVersion)
 
@@ -208,10 +209,10 @@ DROP FUNCTION func (text, text, text, text);
 	`)
 
 	t.Run("get apply SQL for uncommitted version", func(t *testing.T) {
-		fileContent, err := ioutil.ReadFile(fileName)
+		fileContent, err := ioutil.ReadFile(filePath)
 		assert.NoError(t, err, "failed to read test file")
 
-		d := definitionFile{path: fileName, content: fileContent}
+		d := definitionFile{path: fileName, content: fileContent, gitRoot: gitRoot}
 
 		sql, version, err := d.getApplySQL(secondVersion)
 
@@ -226,10 +227,10 @@ DROP FUNCTION func (text, text, text, text);
 	})
 
 	t.Run("get rollback SQL for uncommitted version", func(t *testing.T) {
-		fileContent, err := ioutil.ReadFile(fileName)
+		fileContent, err := ioutil.ReadFile(filePath)
 		assert.NoError(t, err, "failed to read test file")
 
-		d := definitionFile{path: fileName, content: fileContent}
+		d := definitionFile{path: fileName, content: fileContent, gitRoot: gitRoot}
 
 		sql, version, err := d.getRollbackSQL(uncommittedVersion)
 
@@ -244,19 +245,20 @@ DROP FUNCTION func (text, text, text, text);
 	})
 
 	t.Run("get apply SQL for second uncommitted version", func(t *testing.T) {
-		fileContent, err := ioutil.ReadFile(fileName)
+		fileContent, err := ioutil.ReadFile(filePath)
 		assert.NoError(t, err, "failed to read test file")
 
-		d := definitionFile{path: fileName, content: fileContent}
+		d := definitionFile{path: fileName, content: fileContent, gitRoot: gitRoot}
 
 		_, _, err = d.getApplySQL(uncommittedVersion)
 
 		assert.Error(t, err, "should not allow a migration when the currently applied version is uncommitted")
 	})
 
-	secondFileName := filepath.Join(name, "/test_def2.sql")
+	secondFileName := "test_def2.sql"
+	secondFilePath := filepath.Join(gitRoot, "/test_def2.sql")
 
-	secondFile, err := os.Create(secondFileName)
+	secondFile, err := os.Create(secondFilePath)
 
 	assert.NoError(t, err, "failed to create second definition file")
 
@@ -273,10 +275,10 @@ DROP FUNCTION func (text, text, text, text);
 	`)
 
 	t.Run("get apply SQL for untracked file", func(t *testing.T) {
-		fileContent, err := ioutil.ReadFile(secondFileName)
+		fileContent, err := ioutil.ReadFile(secondFilePath)
 		assert.NoError(t, err, "failed to read test file")
 
-		d := definitionFile{path: secondFileName, content: fileContent}
+		d := definitionFile{path: secondFileName, content: fileContent, gitRoot: gitRoot}
 
 		sql, version, err := d.getApplySQL("")
 
@@ -291,10 +293,10 @@ DROP FUNCTION func (text, text, text, text);
 	})
 
 	t.Run("get rollback SQL for untracked file", func(t *testing.T) {
-		fileContent, err := ioutil.ReadFile(secondFileName)
+		fileContent, err := ioutil.ReadFile(secondFilePath)
 		assert.NoError(t, err, "failed to read test file")
 
-		d := definitionFile{path: secondFileName, content: fileContent}
+		d := definitionFile{path: secondFileName, content: fileContent, gitRoot: gitRoot}
 
 		sql, version, err := d.getRollbackSQL(uncommittedVersion)
 
@@ -309,10 +311,10 @@ DROP FUNCTION func (text, text, text, text);
 	})
 
 	t.Run("get apply SQL for already untracked file", func(t *testing.T) {
-		fileContent, err := ioutil.ReadFile(secondFileName)
+		fileContent, err := ioutil.ReadFile(secondFilePath)
 		assert.NoError(t, err, "failed to read test file")
 
-		d := definitionFile{path: secondFileName, content: fileContent}
+		d := definitionFile{path: secondFileName, content: fileContent, gitRoot: gitRoot}
 
 		_, _, err = d.getApplySQL(uncommittedVersion)
 

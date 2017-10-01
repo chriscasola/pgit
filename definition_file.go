@@ -16,6 +16,7 @@ const (
 )
 
 type definitionFile struct {
+	gitRoot string
 	path    string
 	content []byte
 }
@@ -48,9 +49,9 @@ func (d *definitionFile) parse(fileContent []byte) (string, string, error) {
 			inRollback = true
 			inDefinition = false
 		} else if inDefinition {
-			definition += lines[i]
+			definition += (lines[i] + sep)
 		} else if inRollback {
-			rollback += lines[i]
+			rollback += (lines[i] + sep)
 		}
 	}
 
@@ -68,22 +69,17 @@ func (d *definitionFile) parse(fileContent []byte) (string, string, error) {
 var shaRegexp = regexp.MustCompile(`^([a-fA-F0-9]{40})\s*`)
 
 func (d *definitionFile) getCurrentSHA() (string, error) {
-	relativePath, err := d.getPathRelativeToGitRoot()
-	if err != nil {
-		return "", err
-	}
-
 	// check for uncommitted changes
-	cmd := exec.Command("git", "status", relativePath, "--porcelain")
-	cmd.Dir = filepath.Dir(d.path)
+	cmd := exec.Command("git", "status", d.path, "--porcelain")
+	cmd.Dir = d.gitRoot
 	fileStatus, err := cmd.Output()
 
-	if len(fileStatus) > 1 {
+	if err != nil || strings.Contains(string(fileStatus), d.path) {
 		return uncommittedVersion, nil
 	}
 
 	cmd = exec.Command("git", "log", "--pretty=oneline", "--follow", "-n", "1", d.path)
-	cmd.Dir = filepath.Dir(d.path)
+	cmd.Dir = d.gitRoot
 	result, err := cmd.Output()
 
 	if err != nil {
@@ -120,8 +116,7 @@ func (d *definitionFile) getApplySQL(currentVersion string) (string, string, err
 	}
 
 	if fileVersion == uncommittedVersion {
-		relativePath, _ := d.getPathRelativeToGitRoot()
-		fmt.Printf("Applying uncommitted file %v, be sure to rollback before committing!\n", relativePath)
+		fmt.Printf("Applying uncommitted file %v, be sure to rollback before committing!\n", d.path)
 	}
 
 	apply, _, err := d.parse(d.content)
@@ -164,7 +159,7 @@ func (d *definitionFile) getRollbackSQL(currentVersion string) (string, string, 
 	previousFileContent := make([]byte, 0)
 
 	if currentVersion == uncommittedVersion {
-		currentFileContent, err = ioutil.ReadFile(d.path)
+		currentFileContent, err = ioutil.ReadFile(filepath.Join(d.gitRoot, d.path))
 		if err != nil {
 			return "", "", err
 		}
@@ -218,7 +213,7 @@ func (d *definitionFile) getRollbackSQL(currentVersion string) (string, string, 
 
 func (d *definitionFile) getFileCommits() ([]string, error) {
 	cmd := exec.Command("git", "log", "--format=%H", "--follow", d.path)
-	cmd.Dir = filepath.Dir(d.path)
+	cmd.Dir = d.gitRoot
 	history, err := cmd.Output()
 	if err != nil {
 		return make([]string, 0), nil
@@ -238,14 +233,9 @@ func (d *definitionFile) getFileCommits() ([]string, error) {
 func (d *definitionFile) getFileAtCommit(version string) ([]byte, error) {
 	var result []byte
 
-	relativePath, err := d.getPathRelativeToGitRoot()
-	if err != nil {
-		return result, errors.Wrap(err, "unable to get path of file relative to git root")
-	}
-
-	cmd := exec.Command("git", "show", version+":"+relativePath)
-	cmd.Dir = filepath.Dir(d.path)
-	result, err = cmd.Output()
+	cmd := exec.Command("git", "show", version+":"+d.path)
+	cmd.Dir = d.gitRoot
+	result, err := cmd.Output()
 
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -256,35 +246,4 @@ func (d *definitionFile) getFileAtCommit(version string) ([]byte, error) {
 	}
 
 	return result, nil
-}
-
-func (d *definitionFile) getPathRelativeToGitRoot() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
-	cmd.Dir = filepath.Dir(d.path)
-	gitRootPath, err := cmd.Output()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			fmt.Printf("git command error: %v", string(exitErr.Stderr))
-			return "", errors.Wrapf(err, "git command failure: %v", exitErr.Error())
-		}
-		return "", err
-	}
-
-	// git evaluates symlinks when searching for the root directory so
-	// we need to remove symlinks from the file path so we can properly
-	// determine the path of the file relative to the git root
-	filePath, err := filepath.EvalSymlinks(d.path)
-	if err != nil {
-		return "", nil
-	}
-
-	if gitRootPath[len(gitRootPath)-1] != filepath.Separator {
-		gitRootPath = append(gitRootPath, filepath.Separator)
-	}
-
-	// can't use filepath.Rel because it annoyingly prefixes the relative
-	// path with "../" which git doesn't like
-	relativePath := filePath[len(gitRootPath)-1:]
-
-	return relativePath, nil
 }

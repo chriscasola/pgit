@@ -1,18 +1,20 @@
 package pgit
 
-// Pgit is an instance of Pgit that is bound to a specific rootPath
-// where the database schema is located and a particulare database
-// connection.
+// Pgit is an instance of Pgit that is bound to a specific schema
+// directory where the database schema is located and a particular
+// database connection.
 type Pgit struct {
-	rootPath string
-	db       DatabaseConnection
-	schema   *schemaDirectory
+	db     DatabaseConnection
+	schema *schemaDirectory
 }
 
 // New initializes and returns a new Pgit instance
 func New(rootPath string, db DatabaseConnection) (*Pgit, error) {
-	schema := newSchemaDirectory(rootPath)
-	return &Pgit{rootPath: rootPath, db: db, schema: schema}, nil
+	schema, err := newSchemaDirectory(rootPath)
+	if err != nil {
+		return nil, err
+	}
+	return &Pgit{db: db, schema: schema}, nil
 }
 
 // ApplyLatest ensures the latest version of the schema has been applied
