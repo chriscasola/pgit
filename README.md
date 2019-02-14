@@ -9,7 +9,7 @@ Pronounce "pee-git" - a database migration tool that lets you keep your schema a
 
 ## Installing
 
-go get github.com/chriscasola/pgit
+go get github.com/chriscasola/pgit/cmd/pgit
 
 ## Usage 
 
